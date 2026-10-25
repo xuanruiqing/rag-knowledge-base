@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RAG知识库系统</title>
+    <style>
+        * {box-sizing: border-box;font-family:"Microsoft Yahei",sans-serif;}
+        .wrap {width:900px;margin:30px auto;padding:20px;}
+        .block {border:1px solid #dcdcdc;border-radius:8px;padding:16px;margin-bottom:20px;}
+        h2 {color:#222;text-align:center;}
+        input[type="file"] {margin:10px 0;}
+        button {background:#2b7cd3;color:white;border:none;padding:8px 16px;border-radius:4px;cursor:pointer;margin:4px;}
+        button:disabled{background:#999;cursor:not-allowed;}
+        #msg {color:#2b7cd3;margin:8px 0;}
+        textarea {width:100%;height:110px;padding:10px;font-size:16px;}
+        #answer {white-space:pre-wrap;margin-top:10px;padding:12px;background:#f7f8fa;min-height:100px;}
+    </style>
+</head>
+<body>
+    <div class="wrap">
+        <h2>📖 RAG知识库问答系统</h2>
+        <!-- 文件上传区域 -->
+        <div class="block">
+            <h3>📤 上传文档（支持 txt / pdf）</h3>
+            <input type="file" id="fileInput" accept=".txt,.pdf">
+            <button onclick="uploadFile()">上传并入库</button>
+            <div id="msg"></div>
+        </div>
+        <!-- RAG问答区域 -->
+        <div class="block">
+            <h3>💬 知识库提问</h3>
+            <p>会话ID：<input id="sid" value="test_session_001" style="padding:4px;"></p>
+            <textarea id="question" placeholder="在这里输入你的中文问题..."></textarea>
+            <button onclick="sendQuery()">提交提问</button>
+            <div>回答：</div>
+            <div id="answer"></div>
+        </div>
+    </div>
+
+<script>
+const baseUrl = "http://127.0.0.1:8000";
+
+// 上传文件
+async function uploadFile(){
+    const fileDom = document.getElementById("fileInput");
+    const msgDom = document.getElementById("msg");
+    const file = fileDom.files[0];
+    if(!file){
+        msgDom.innerText = "请先选择txt或pdf文件！";
+        return;
+    }
+    msgDom.innerText = "正在上传并向向量库写入文档，请稍候...";
+    const formData = new FormData();
+    formData.append("file", file);
+    try{
+        const resp = await fetch(`${baseUrl}/upload_file`,{
+            method:"POST",
+            body:formData
+        })
+        const res = await resp.json();
+        if(res.code ===200){
+            msgDom.innerText = "✅ " + res.msg;
+        }else{
+            msgDom.innerText = "❌ " + res.msg;
+        }
+    }catch(err){
+        msgDom.innerText = "❌ 请求失败，请确认后端服务正在运行";
+        console.error(err);
+    }
+}
+
+// RAG提问
+async function sendQuery(){
+    const sid = document.getElementById("sid").value;
+    const q = document.getElementById("question").value.trim();
+    const ansDom = document.getElementById("answer");
+    if(!q){
+        ansDom.innerText = "请输入问题";
+        return;
+    }
+    ansDom.innerText = "思考检索中...";
+    try{
+        const resp = await fetch(`${baseUrl}/rag/query`,{
+            method:"POST",
+            headers:{"Content-Type":"application/json"},
+            body:JSON.stringify({session_id:sid, question:q})
+        })
+        const data = await resp.json();
+        ansDom.innerText = data.answer;
+    }catch(err){
+        ansDom.innerText = "请求异常";
+        console.error(err);
+    }
+}
+</script>
+</body>
+</html>
