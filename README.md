@@ -11,6 +11,18 @@
 - **流式生成**：回答由火山方舟模型流式生成；Embedding 接口不可用时检索降级为空片段，服务不中断。
 - **会话持久化**：SQLite 保存多轮会话，按 `MAX_CHAT_TURN` 带入最近历史。
 
+## 演示
+
+上传入库：选择 `txt` / `pdf` 后立即切分、向量化写入 Chroma，页面回显入库结果。
+
+![上传入库](docs/demo-upload.png)
+
+知识库问答：问题经 cosine 召回 + `TextReRank` 重排后交给大模型，答案完全来自私有文档。
+
+![问答效果](docs/demo-qa.png)
+
+> 截图来自本地真实运行（`uvicorn main:app`），非设计稿。
+
 ## 技术栈
 
 FastAPI · ChromaDB · OpenAI 兼容 SDK（火山方舟 Ark）· 阿里百炼 Embedding / Rerank · pdfplumber · SQLite
@@ -22,6 +34,7 @@ FastAPI · ChromaDB · OpenAI 兼容 SDK（火山方舟 Ark）· 阿里百炼 Em
 ├── main.py             # 文档解析 / 增量入库 / 检索 / 流式问答 / FastAPI 接口
 ├── index.html          # 上传 + 问答页面
 ├── data/               # 知识库原始文件（txt / pdf）
+├── docs/               # README 演示截图
 ├── requirements.txt
 ├── .env.example
 └── LICENSE
