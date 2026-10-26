@@ -165,10 +165,12 @@ def load_file_content(file_path: Path) -> str:
 
 # -------------------------- 批量入库【重点修复：分批Embedding，单批最多25】 --------------------------
 async def add_folder_to_rag(folder_path: str = "./data"):
+    """扫描目录做增量入库，返回本次新增 / 跳过 / 失败的文件清单。"""
+    stats = {"added": [], "skipped": [], "failed": []}
     data_dir = Path(folder_path)
     if not data_dir.exists():
         logger.warning(f"文件夹{folder_path}不存在")
-        return
+        return stats
     file_list = []
     for f in data_dir.iterdir():
         if f.is_file() and f.suffix.lower() in [".txt", ".pdf"]:
@@ -181,11 +183,13 @@ async def add_folder_to_rag(folder_path: str = "./data"):
         changed, new_md5 = check_file_changed(fp)
         if not changed and not force_rebuild:
             logger.info(f"✅ {fp.name} 文件未修改，跳过处理")
+            stats["skipped"].append(fp.name)
             continue
         logger.info(f"🔄 处理文件: {fp.name}")
         text = load_file_content(fp)
         if not text.strip():
             logger.warning(f"{fp.name} 读取内容为空，跳过")
+            stats["failed"].append(fp.name)
             update_md5_record(fp, new_md5)
             continue
         chunks = split_text(text)
@@ -199,6 +203,7 @@ async def add_folder_to_rag(folder_path: str = "./data"):
                 all_embeddings.extend(await asyncio.to_thread(embed_texts, batch_chunks))
         except Exception as e:
             logger.error(f"{fp.name} 向量化失败，跳过该文件：{e}")
+            stats["failed"].append(fp.name)
             continue
 
         ids = [f"{fp.name}:{i}" for i in range(len(chunks))]
@@ -218,7 +223,9 @@ async def add_folder_to_rag(folder_path: str = "./data"):
             metadatas=metadatas
         )
         update_md5_record(fp, new_md5)
+        stats["added"].append(fp.name)
         logger.info(f"✅ {fp.name} 入库完成")
+    return stats
 
 # -------------------------- 检索 + Rerank【修复：使用dashscope原生Rerank】 --------------------------
 async def retrieve_knowledge(query: str) -> List[str]:
@@ -397,14 +404,24 @@ async def upload_file(file: UploadFile = File(...)):
     with file_path.open("wb") as f:
         shutil.copyfileobj(file.file, f)
 
-    # 调用你现有的增量入库函数 add_folder_to_rag
-    await add_folder_to_rag("./data")
+    # 调用增量入库函数，按实际处理结果返回提示
+    stats = await add_folder_to_rag("./data")
 
-    return {
-        "code": 200,
-        "msg": f"文件 {filename} 上传成功，已完成向量入库",
-        "saved_path": str(file_path)
-    }
+    if filename in stats["added"]:
+        return {"code": 200, "status": "added",
+                "msg": f"{filename} 已切分并写入向量库",
+                "saved_path": str(file_path)}
+    if filename in stats["skipped"]:
+        return {"code": 200, "status": "skipped",
+                "msg": f"{filename} 内容未变化（MD5 一致），已跳过重复入库",
+                "saved_path": str(file_path)}
+    if filename in stats["failed"]:
+        return {"code": 500, "status": "failed",
+                "msg": f"{filename} 处理失败，请检查文件内容或向量化服务",
+                "saved_path": str(file_path)}
+    return {"code": 200, "status": "pending",
+            "msg": f"{filename} 已保存，入库未触发变更",
+            "saved_path": str(file_path)}
 
 
 # -------------------------- 主入口 --------------------------

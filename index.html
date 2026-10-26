@@ -1,98 +1,392 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>RAG知识库系统</title>
-    <style>
-        * {box-sizing: border-box;font-family:"Microsoft Yahei",sans-serif;}
-        .wrap {width:900px;margin:30px auto;padding:20px;}
-        .block {border:1px solid #dcdcdc;border-radius:8px;padding:16px;margin-bottom:20px;}
-        h2 {color:#222;text-align:center;}
-        input[type="file"] {margin:10px 0;}
-        button {background:#2b7cd3;color:white;border:none;padding:8px 16px;border-radius:4px;cursor:pointer;margin:4px;}
-        button:disabled{background:#999;cursor:not-allowed;}
-        #msg {color:#2b7cd3;margin:8px 0;}
-        textarea {width:100%;height:110px;padding:10px;font-size:16px;}
-        #answer {white-space:pre-wrap;margin-top:10px;padding:12px;background:#f7f8fa;min-height:100px;}
-    </style>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>RAG 知识库问答系统</title>
+<style>
+    :root {
+        --bg: #f4f6fb;
+        --card: #ffffff;
+        --text: #101828;
+        --muted: #667085;
+        --line: #e7ecf3;
+        --brand: #3b6ef6;
+        --brand-2: #6d4aff;
+        --ok: #12a150;
+        --warn: #b54708;
+        --err: #d92d20;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+        margin: 0;
+        min-height: 100vh;
+        background:
+            radial-gradient(900px 420px at 12% -10%, rgba(109, 74, 255, .10), transparent 60%),
+            radial-gradient(760px 380px at 88% 0%, rgba(59, 110, 246, .12), transparent 62%),
+            var(--bg);
+        color: var(--text);
+        font-family: -apple-system, "Segoe UI", "Microsoft YaHei", system-ui, sans-serif;
+        -webkit-font-smoothing: antialiased;
+    }
+
+    .page {
+        max-width: 1120px;
+        margin: 0 auto;
+        padding: 52px 32px 64px;
+    }
+
+    header {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: flex-end;
+        justify-content: space-between;
+        gap: 16px;
+        margin-bottom: 28px;
+    }
+
+    h1 {
+        margin: 0;
+        font-size: 30px;
+        letter-spacing: -.4px;
+        font-weight: 700;
+    }
+
+    h1 span {
+        background: linear-gradient(92deg, var(--brand), var(--brand-2));
+        -webkit-background-clip: text;
+        background-clip: text;
+        color: transparent;
+    }
+
+    .subtitle {
+        margin: 8px 0 0;
+        color: var(--muted);
+        font-size: 14px;
+    }
+
+    .badges { display: flex; flex-wrap: wrap; gap: 8px; }
+
+    .badge {
+        font-size: 12px;
+        color: #475467;
+        background: rgba(255, 255, 255, .8);
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        padding: 5px 11px;
+    }
+
+    .grid {
+        display: grid;
+        grid-template-columns: 396px minmax(0, 1fr);
+        gap: 22px;
+        align-items: start;
+    }
+
+    .card {
+        background: var(--card);
+        border: 1px solid var(--line);
+        border-radius: 16px;
+        padding: 24px;
+        box-shadow: 0 1px 2px rgba(16, 24, 40, .04), 0 18px 40px -24px rgba(16, 24, 40, .22);
+    }
+
+    .card-title {
+        display: flex;
+        align-items: center;
+        gap: 9px;
+        margin: 0 0 6px;
+        font-size: 15.5px;
+        font-weight: 600;
+    }
+
+    .card-title .ico { font-size: 17px; }
+
+    .card-desc {
+        margin: 0 0 18px;
+        color: var(--muted);
+        font-size: 12.5px;
+        line-height: 1.6;
+    }
+
+    .dropzone {
+        border: 1.5px dashed #cfd8e6;
+        border-radius: 12px;
+        background: #fafbff;
+        padding: 18px;
+        text-align: center;
+        transition: border-color .15s ease, background .15s ease;
+    }
+
+    .dropzone:hover { border-color: #a9bdf0; background: #f7f9ff; }
+
+    input[type="file"] { width: 100%; font-size: 13px; color: var(--muted); }
+    input[type="file"]::file-selector-button {
+        margin-right: 10px;
+        padding: 7px 12px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: #fff;
+        color: #344054;
+        font-size: 13px;
+        cursor: pointer;
+    }
+
+    .btn {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 8px;
+        width: 100%;
+        margin-top: 14px;
+        padding: 11px 16px;
+        border: 0;
+        border-radius: 10px;
+        background: linear-gradient(92deg, var(--brand), var(--brand-2));
+        color: #fff;
+        font-size: 14px;
+        font-weight: 600;
+        cursor: pointer;
+        box-shadow: 0 8px 18px -10px rgba(59, 110, 246, .9);
+        transition: transform .12s ease, box-shadow .12s ease, opacity .12s ease;
+    }
+
+    .btn:hover:not(:disabled) { transform: translateY(-1px); box-shadow: 0 12px 22px -12px rgba(59, 110, 246, .95); }
+    .btn:disabled { opacity: .6; cursor: not-allowed; box-shadow: none; }
+
+    .status {
+        display: flex;
+        align-items: flex-start;
+        gap: 8px;
+        margin-top: 14px;
+        font-size: 12.5px;
+        line-height: 1.6;
+        color: var(--muted);
+        word-break: break-all;
+    }
+
+    .status::before {
+        content: "";
+        flex: none;
+        width: 7px;
+        height: 7px;
+        margin-top: 5px;
+        border-radius: 50%;
+        background: #cbd5e1;
+    }
+
+    .status.loading::before { background: var(--brand); animation: pulse 1s ease-in-out infinite; }
+    .status.ok { color: #05603a; }
+    .status.ok::before { background: var(--ok); }
+    .status.info { color: #175cd3; }
+    .status.info::before { background: var(--brand); }
+    .status.err { color: var(--err); }
+    .status.err::before { background: var(--err); }
+
+    @keyframes pulse {
+        0%, 100% { opacity: 1; transform: scale(1); }
+        50% { opacity: .35; transform: scale(.85); }
+    }
+
+    .row {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        margin-bottom: 14px;
+    }
+
+    .row label { font-size: 12.5px; color: var(--muted); flex: none; }
+
+    .row input {
+        flex: 1;
+        min-width: 0;
+        padding: 8px 12px;
+        border: 1px solid var(--line);
+        border-radius: 9px;
+        font-size: 13px;
+        color: #344054;
+        background: #fff;
+        outline: none;
+    }
+
+    .row input:focus, textarea:focus {
+        border-color: #b9c8f5;
+        box-shadow: 0 0 0 3px rgba(59, 110, 246, .12);
+    }
+
+    textarea {
+        width: 100%;
+        height: 108px;
+        padding: 13px 14px;
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        font-family: inherit;
+        font-size: 14px;
+        line-height: 1.6;
+        color: var(--text);
+        resize: vertical;
+        outline: none;
+    }
+
+    .answer-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin: 20px 0 9px;
+        font-size: 12.5px;
+        color: var(--muted);
+    }
+
+    .answer {
+        min-height: 132px;
+        padding: 15px 17px;
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        background: #fbfcfe;
+        font-size: 14px;
+        line-height: 1.8;
+        white-space: pre-wrap;
+        word-break: break-word;
+        color: #1d2939;
+    }
+
+    .answer.empty { color: #98a2b3; }
+
+    footer {
+        margin-top: 26px;
+        text-align: center;
+        font-size: 12px;
+        color: #98a2b3;
+    }
+
+    @media (max-width: 900px) {
+        .page { padding: 32px 18px 48px; }
+        .grid { grid-template-columns: 1fr; }
+        h1 { font-size: 24px; }
+    }
+</style>
 </head>
 <body>
-    <div class="wrap">
-        <h2>📖 RAG知识库问答系统</h2>
-        <!-- 文件上传区域 -->
-        <div class="block">
-            <h3>📤 上传文档（支持 txt / pdf）</h3>
-            <input type="file" id="fileInput" accept=".txt,.pdf">
-            <button onclick="uploadFile()">上传并入库</button>
-            <div id="msg"></div>
+<div class="page">
+    <header>
+        <div>
+            <h1>RAG <span>知识库问答</span></h1>
+            <p class="subtitle">上传私有文档即完成切分与向量入库，提问时经 cosine 召回 + Rerank 重排后由大模型作答</p>
         </div>
-        <!-- RAG问答区域 -->
-        <div class="block">
-            <h3>💬 知识库提问</h3>
-            <p>会话ID：<input id="sid" value="test_session_001" style="padding:4px;"></p>
-            <textarea id="question" placeholder="在这里输入你的中文问题..."></textarea>
-            <button onclick="sendQuery()">提交提问</button>
-            <div>回答：</div>
-            <div id="answer"></div>
+        <div class="badges">
+            <span class="badge">FastAPI</span>
+            <span class="badge">ChromaDB</span>
+            <span class="badge">TextReRank</span>
+            <span class="badge">ark · LLM</span>
         </div>
+    </header>
+
+    <div class="grid">
+        <section class="card">
+            <h2 class="card-title"><span class="ico">📤</span> 上传文档</h2>
+            <p class="card-desc">支持 txt / pdf。文件内容未变化（MD5 一致）时会跳过重复入库。</p>
+            <div class="dropzone">
+                <input type="file" id="fileInput" accept=".txt,.pdf">
+            </div>
+            <button class="btn" id="uploadBtn" onclick="uploadFile()">上传并入库</button>
+            <div class="status" id="msg">尚未选择文件</div>
+        </section>
+
+        <section class="card">
+            <h2 class="card-title"><span class="ico">💬</span> 知识库提问</h2>
+            <p class="card-desc">答案严格来自检索到的片段，资料中没有的内容会直接回答未找到。Ctrl + Enter 快速提交。</p>
+            <div class="row">
+                <label for="sid">会话 ID</label>
+                <input id="sid" value="test_session_001" spellcheck="false">
+            </div>
+            <textarea id="question" placeholder="例如：系统支持哪些文件格式？"></textarea>
+            <button class="btn" id="queryBtn" onclick="sendQuery()">提交提问</button>
+            <div class="answer-head">
+                <span>回答</span>
+            </div>
+            <div class="answer empty" id="answer">等待提问</div>
+        </section>
     </div>
+
+    <footer>FastAPI · ChromaDB · 阿里百炼 Embedding / TextReRank · 火山方舟</footer>
+</div>
 
 <script>
 const baseUrl = "http://127.0.0.1:8000";
+const msgDom = document.getElementById("msg");
+const answerDom = document.getElementById("answer");
 
-// 上传文件
-async function uploadFile(){
+function setStatus(type, text) {
+    msgDom.className = "status " + type;
+    msgDom.textContent = text;
+}
+
+async function uploadFile() {
     const fileDom = document.getElementById("fileInput");
-    const msgDom = document.getElementById("msg");
+    const uploadBtn = document.getElementById("uploadBtn");
     const file = fileDom.files[0];
-    if(!file){
-        msgDom.innerText = "请先选择txt或pdf文件！";
+    if (!file) {
+        setStatus("err", "请先选择 txt 或 pdf 文件");
         return;
     }
-    msgDom.innerText = "正在上传并向向量库写入文档，请稍候...";
+    uploadBtn.disabled = true;
+    setStatus("loading", "正在解析、切分并写入向量库，请稍候…");
     const formData = new FormData();
     formData.append("file", file);
-    try{
-        const resp = await fetch(`${baseUrl}/upload_file`,{
-            method:"POST",
-            body:formData
-        })
+    try {
+        const resp = await fetch(`${baseUrl}/upload_file`, { method: "POST", body: formData });
         const res = await resp.json();
-        if(res.code ===200){
-            msgDom.innerText = "✅ " + res.msg;
-        }else{
-            msgDom.innerText = "❌ " + res.msg;
+        if (res.code === 200) {
+            setStatus(res.status === "skipped" ? "info" : "ok", res.msg);
+        } else {
+            setStatus("err", res.msg);
         }
-    }catch(err){
-        msgDom.innerText = "❌ 请求失败，请确认后端服务正在运行";
+    } catch (err) {
+        setStatus("err", "请求失败，请确认后端服务正在运行");
         console.error(err);
+    } finally {
+        uploadBtn.disabled = false;
     }
 }
 
-// RAG提问
-async function sendQuery(){
-    const sid = document.getElementById("sid").value;
+async function sendQuery() {
+    const sid = document.getElementById("sid").value.trim() || "default_session";
     const q = document.getElementById("question").value.trim();
-    const ansDom = document.getElementById("answer");
-    if(!q){
-        ansDom.innerText = "请输入问题";
+    const queryBtn = document.getElementById("queryBtn");
+    if (!q) {
+        answerDom.classList.add("empty");
+        answerDom.textContent = "请输入问题";
         return;
     }
-    ansDom.innerText = "思考检索中...";
-    try{
-        const resp = await fetch(`${baseUrl}/rag/query`,{
-            method:"POST",
-            headers:{"Content-Type":"application/json"},
-            body:JSON.stringify({session_id:sid, question:q})
-        })
+    queryBtn.disabled = true;
+    queryBtn.textContent = "检索中…";
+    answerDom.classList.remove("empty");
+    answerDom.textContent = "正在检索知识库…";
+    try {
+        const resp = await fetch(`${baseUrl}/rag/query`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ session_id: sid, question: q })
+        });
         const data = await resp.json();
-        ansDom.innerText = data.answer;
-    }catch(err){
-        ansDom.innerText = "请求异常";
+        answerDom.textContent = data.answer;
+    } catch (err) {
+        answerDom.textContent = "请求异常，请确认后端服务正在运行";
         console.error(err);
+    } finally {
+        queryBtn.disabled = false;
+        queryBtn.textContent = "提交提问";
     }
 }
+
+document.getElementById("question").addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+        e.preventDefault();
+        sendQuery();
+    }
+});
 </script>
 </body>
 </html>
