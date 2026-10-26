@@ -1,6 +1,7 @@
 import os
 import asyncio
 import hashlib
+import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 from dotenv import load_dotenv
@@ -49,6 +50,12 @@ LLM_TEMPERATURE = float(os.getenv("LLM_TEMPERATURE", 0.7))
 
 EMBED_BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1"
 EMBED_TIMEOUT = 15
+RERANK_TIMEOUT = 6
+COOLDOWN_SECONDS = 60
+
+# 外部检索接口异常后的熔断时间戳：冷却期内直接走本地关键词降级，避免每次请求都等超时
+_embed_failed_at = 0.0
+_rerank_failed_at = 0.0
 
 
 def embed_texts(texts: List[str]) -> List[List[float]]:
@@ -228,9 +235,94 @@ async def add_folder_to_rag(folder_path: str = "./data"):
     return stats
 
 # -------------------------- 检索 + Rerank【修复：使用dashscope原生Rerank】 --------------------------
+def _query_grams(text: str) -> set:
+    """中文按字符 bigram、英文/数字按词切分，用于本地关键词降级检索。"""
+    grams = set()
+    for seg in re.findall(r"[\u4e00-\u9fff]+", text):
+        if len(seg) == 1:
+            grams.add(seg)
+        grams.update(seg[i:i + 2] for i in range(len(seg) - 1))
+    grams.update(w.lower() for w in re.findall(r"[A-Za-z0-9]+", text))
+    return grams
+
+
+def _keyword_search(query: str) -> List[str]:
+    """Embedding 不可用时的降级检索：在本地 Chroma 语料上按 bigram 重叠度打分。"""
+    try:
+        data = collection.get(include=["documents"])
+    except Exception as e:
+        logger.error(f"关键词降级检索失败：{e}")
+        return []
+
+    docs = data.get("documents") or []
+    q_grams = _query_grams(query)
+    if not q_grams:
+        return []
+
+    scored = []
+    for doc in docs:
+        overlap = len(q_grams & _query_grams(doc))
+        if overlap:
+            scored.append((overlap, doc))
+    scored.sort(key=lambda x: x[0], reverse=True)
+
+    result = [doc for _, doc in scored[:RERANK_TOP_K]]
+    logger.info(f"关键词降级检索命中 {len(result)} 条")
+    return result
+
+
+async def _rerank(query: str, docs: List[str]) -> List[str]:
+    """Rerank 失败或超时时降级为向量召回顺序。"""
+    global _rerank_failed_at
+    if time.time() - _rerank_failed_at < COOLDOWN_SECONDS:
+        return docs[:RERANK_TOP_K]
+
+    try:
+        from dashscope import TextReRank
+        rerank_resp = await asyncio.wait_for(
+            asyncio.to_thread(
+                TextReRank.call,
+                model=RERANK_MODEL,
+                query=query,
+                documents=docs,
+            ),
+            timeout=RERANK_TIMEOUT,
+        )
+        if rerank_resp.status_code != 200:
+            _rerank_failed_at = time.time()
+            logger.error(f"Rerank接口调用失败，降级使用原始召回结果, err:{rerank_resp.message}")
+            return docs[:RERANK_TOP_K]
+
+        rerank_results = sorted(rerank_resp.output["results"], key=lambda x: x["relevance_score"], reverse=True)
+        reranked_docs = []
+        for item in rerank_results[:RERANK_TOP_K]:
+            score = item["relevance_score"]
+            # ✅重点：用index从原始docs取出原文！
+            doc_text = docs[item["index"]] or ""
+            reranked_docs.append(doc_text)
+            logger.info(f"Rerank 得分:{score:.3f} 文本片段: {doc_text[:60]}...")
+        logger.info(f"Rerank重排完成，最终选取{len(reranked_docs)}条片段送入LLM")
+        return reranked_docs
+
+    except Exception as e:
+        _rerank_failed_at = time.time()
+        logger.error(f"Rerank 异常，{COOLDOWN_SECONDS}s 内降级使用向量召回结果：{e}")
+        return docs[:RERANK_TOP_K]
+
+
 async def retrieve_knowledge(query: str) -> List[str]:
+    """向量召回 + 阈值过滤 + Rerank；外部接口异常时熔断并降级为本地关键词检索。"""
+    global _embed_failed_at
+    query = (query or "").strip()
+    if not query:
+        return []
+
+    if time.time() - _embed_failed_at < COOLDOWN_SECONDS:
+        return _keyword_search(query)
+
     try:
         query_emb = (await asyncio.to_thread(embed_texts, [query]))[0]
+        _embed_failed_at = 0.0
         logger.info(f"当前查询向量维度:{len(query_emb)}")
         results = collection.query(
             query_embeddings=[query_emb],
@@ -247,39 +339,18 @@ async def retrieve_knowledge(query: str) -> List[str]:
             if sim >= SIMILAR_THRESHOLD:
                 filtered_docs.append(doc)
         logger.info(f"向量召回+阈值过滤后片段数量: {len(filtered_docs)}")
-        if len(filtered_docs) == 0:
-            return []
+        if not filtered_docs:
+            return _keyword_search(query)
 
-        from dashscope import TextReRank
-        rerank_resp = TextReRank.call(
-            model=RERANK_MODEL,
-            query=query,
-            documents=filtered_docs
-        )
-        if rerank_resp.status_code != 200:
-            logger.error(f"Rerank接口调用失败，降级使用原始召回结果, err:{rerank_resp.message}")
-            return filtered_docs[:RERANK_TOP_K]
+        return await _rerank(query, filtered_docs)
 
-        rerank_results = sorted(rerank_resp.output["results"], key=lambda x: x["relevance_score"], reverse=True)
-        reranked_docs = []
-        for item in rerank_results[:RERANK_TOP_K]:
-            score = item["relevance_score"]
-            # ✅重点：用index从原始filtered_docs取出原文！
-            original_index = item["index"]
-            doc_text = filtered_docs[original_index]
-            if doc_text is None:
-               doc_text = ""
-            reranked_docs.append(doc_text)
-            logger.info(f"Rerank 得分:{score:.3f} 文本片段: {doc_text[:60]}...")
-        logger.info(f"Rerank重排完成，最终选取{len(reranked_docs)}条片段送入LLM")
-        return reranked_docs
-
-    except requests.RequestException as e:
-        logger.error(f"Embedding接口异常：{e}")
-        return []
+    except (requests.RequestException, asyncio.TimeoutError) as e:
+        _embed_failed_at = time.time()
+        logger.warning(f"Embedding 接口超时，{COOLDOWN_SECONDS}s 内改用关键词检索：{e}")
+        return _keyword_search(query)
     except Exception as e:
         logger.error(f"检索知识库未知异常: {str(e)}", exc_info=True)
-        return []
+        return _keyword_search(query)
 
 
 

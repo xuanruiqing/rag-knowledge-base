@@ -8,7 +8,7 @@
 - **增量入库**：按文件 MD5 判断是否变更，未变更直接跳过；变更时先删除同源旧片段，再 `upsert` 新片段，避免重复 ID 和向量脏数据。
 - **cosine 向量检索**：Chroma collection 固定使用 `hnsw:space=cosine`，相似度按 `1 - distance` 计算；检测到旧的非 cosine collection 会自动重建。
 - **Rerank 重排**：向量召回 Top-K 后用 `TextReRank` 重排取 Top-N；Rerank 失败时降级为原始召回结果。
-- **流式生成**：回答由火山方舟模型流式生成；Embedding 接口不可用时检索降级为空片段，服务不中断。
+- **流式生成**：回答由火山方舟模型流式生成；外部检索接口异常时自动降级，问答不中断。
 - **会话持久化**：SQLite 保存多轮会话，按 `MAX_CHAT_TURN` 带入最近历史。
 
 ## 演示
@@ -75,7 +75,7 @@ python main.py
 - **幂等入库**：`ids = 文件名:片段序号`，写入前先 `delete(where={"source": 文件名})`，再用 `upsert` 写入，重复上传同一文件不会抛 `DuplicateIDError`。
 - **元数据可追溯**：每个片段保存 `source` 与 `chunk_index`，便于定位来源与清理。
 - **相似度口径统一**：cosine 空间下 `distance = 1 - cosine`，相似度直接取 `1 - distance`，不再使用与距离度量无关的经验换算。
-- **失败可降级**：Embedding / Rerank 任一环节异常都会记录日志并退化为可用的召回结果或空上下文，问答链路不因外部接口抖动整体失败。
+- **失败可降级**：Embedding 超时后熔断 60 秒，改用本地中文 bigram 关键词检索（直接扫 Chroma 语料，不依赖外部接口）；Rerank 超时或失败则退化为向量召回顺序，问答链路不因外部接口抖动整体失败。
 
 ## 局限与 Roadmap
 
