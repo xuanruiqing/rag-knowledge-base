@@ -429,12 +429,36 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 
+# -------------------------- 启动预热 --------------------------
+async def warmup_services():
+    """后台预热：提前跑一次检索链路并建立 LLM 端点连接，让首个用户请求不再承担冷启动开销。"""
+    t0 = time.time()
+    try:
+        docs = await retrieve_knowledge("预热检索")
+        logger.info(f"检索链路预热完成，命中 {len(docs)} 条，耗时 {time.time() - t0:.2f}s")
+    except Exception as e:
+        logger.warning(f"检索预热失败，不影响启动：{e}")
+
+    t1 = time.time()
+    try:
+        await llm_client.chat.completions.create(
+            model=VOLC_MODEL_EP,
+            messages=[{"role": "user", "content": "hi"}],
+            max_tokens=1,
+        )
+        logger.info(f"LLM 端点预热完成，耗时 {time.time() - t1:.2f}s")
+    except Exception as e:
+        logger.warning(f"LLM 预热失败，不影响启动：{e}")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """uvicorn 启动时初始化数据库并增量同步知识库。"""
     init_md5_db()
     init_chat_db()
     await add_folder_to_rag("./data")
+    # 放到后台任务里，预热耗时不能拖慢服务启动
+    app.state.warmup_task = asyncio.create_task(warmup_services())
     yield
 
 
